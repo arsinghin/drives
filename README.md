@@ -16,7 +16,7 @@ An Omarchy bar widget for managing drives — mount, unmount, and open removable
 
 ```bash
 # Clone to your Omarchy plugins directory
-git clone https://github.com/yourusername/drives.git ~/.config/omarchy/plugins/drives
+git clone https://github.com/arsinghin/drives.git ~/.config/omarchy/plugins/drives
 
 # Restart the shell to load
 omarchy restart shell
