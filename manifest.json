@@ -4,7 +4,7 @@
   "name": "Drives",
   "version": "1.0.0",
   "author": "Alok Ranjan Singh",
-  "description": "All drives in the Omarchy bar: a single icon opens a popup with every disk, mounted or not — click to open, click to mount, right-click to unmount.",
+  "description": "All drives in the Omarchy bar: a single icon opens a popup with every disk, mounted or not — click to open, click to mount, click `X` to unmount.",
   "kinds": [
     "bar-widget"
   ],
