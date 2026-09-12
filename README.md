@@ -10,7 +10,7 @@ An Omarchy bar widget for managing drives — mount, unmount, and open removable
 - Click ✕ button → unmount
 - Live updates on plug/unplug
 - Usage bars with percentages
-- Configurable refresh interval
+- Configurable refresh interval (default 5s, set via `shell.json`)
 
 ## Installation
 
@@ -38,6 +38,16 @@ omarchy restart shell
 ## Screenshot
 
 ![Drives plugin](screenshot.png)
+
+## Configuration
+
+Optional: set refresh interval in `~/.config/omarchy/shell.json`:
+
+```json
+"drives": {
+  "refreshSeconds": 5
+}
+```
 
 ## Author
 
