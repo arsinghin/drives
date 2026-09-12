@@ -38,6 +38,13 @@ Item {
     return value === undefined || value === null ? fallback : value
   }
 
+  // Sanitize untrusted strings: max length, strip control chars
+  function sanitize(input, maxLen) {
+    if (!input) return ""
+    var s = String(input).replace(/[\x00-\x1F\x7F]/g, "")
+    return s.length > maxLen ? s.slice(0, maxLen) : s
+  }
+
   // True if the row should be shown: anything with a label, or anything
   // mounted somewhere interesting. Skip pseudo-fs and the rootfs.
   function isUseful(d) {
@@ -54,10 +61,10 @@ Item {
 
   // "Local E" -> "E:" — letter-prefix style for old Windows-style labels.
   function displayLabel(label, name) {
-    var text = String(label || "").trim()
+    var text = sanitize(label, 64).trim()
     var m = text.match(/^Local\s+([A-Za-z])$/)
     if (m) return m[1].toUpperCase() + ":"
-    if (text.length === 0) return String(name || "")
+    if (text.length === 0) return sanitize(name, 32)
     return text
   }
 
@@ -74,11 +81,11 @@ Item {
           var p = candidates[c]
           if (!p || !p.name) continue
           var entry = {
-            name: String(p.name),
-            path: String(p.path || ("/dev/" + p.name)),
-            label: String(p.label || ""),
-            mountpoint: String(p.mountpoint || ""),
-            fstype: String(p.fstype || ""),
+            name: sanitize(p.name, 32),
+            path: sanitize(p.path || ("/dev/" + p.name), 128),
+            label: sanitize(p.label, 64),
+            mountpoint: sanitize(p.mountpoint, 256),
+            fstype: sanitize(p.fstype, 32),
             sizeBytes: Number(p.size) || 0
           }
           if (isUseful(entry)) list.push(entry)
@@ -92,21 +99,22 @@ Item {
   function parseDf(raw) {
     var out = {}
     var lines = String(raw || "").split("\n")
-    for (var i = 1; i < lines.length; i++) {
+    for (var i = 1; i < lines.length && i < 128; i++) {
       var line = lines[i]
       if (!line) continue
       var trimmed = line.replace(/^\s+|\s+$/g, "")
       if (!trimmed) continue
       var match = trimmed.match(/^(\d+)%\s+(\d+)\s+(.+)$/)
       if (!match) continue
-      out[match[3]] = { percent: parseInt(match[1], 10), used: parseInt(match[2], 10) }
+      var target = sanitize(match[3], 256)
+      out[target] = { percent: parseInt(match[1], 10), used: parseInt(match[2], 10) }
     }
     return out
   }
 
   function buildDrives(blockList, usageMap) {
     var out = []
-    for (var i = 0; i < blockList.length; i++) {
+    for (var i = 0; i < blockList.length && i < 64; i++) {
       var d = blockList[i]
       var u = d.mountpoint ? usageMap[d.mountpoint] : null
       out.push({
@@ -146,7 +154,7 @@ Item {
     if (!entry || !entry.path || actionProc.running) return
     busyPath = entry.path
     busy = true
-    actionProc.command = ["udisksctl", "mount", "-b", entry.path]
+    actionProc.command = ["/usr/bin/udisksctl", "mount", "-b", entry.path]
     actionProc.running = true
   }
 
@@ -154,13 +162,13 @@ Item {
     if (!entry || !entry.path || actionProc.running) return
     busyPath = entry.path
     busy = true
-    actionProc.command = ["udisksctl", "unmount", "-b", entry.path]
+    actionProc.command = ["/usr/bin/udisksctl", "unmount", "-b", entry.path]
     actionProc.running = true
   }
 
   function openMountpoint(mountpoint) {
     if (!mountpoint) return
-    Util.execArgv(["xdg-open", mountpoint])
+    Util.execArgv(["/usr/bin/xdg-open", mountpoint])
   }
 
   Component.onCompleted: {
@@ -190,8 +198,9 @@ Item {
 
   Process {
     id: lsblkProc
-    command: ["lsblk", "-J", "-b", "-o", "NAME,PATH,LABEL,MOUNTPOINT,FSTYPE,SIZE"]
+    command: ["/usr/bin/lsblk", "-J", "-b", "-o", "NAME,PATH,LABEL,MOUNTPOINT,FSTYPE,SIZE"]
     stdout: StdioCollector {
+      maxBytes: 65536
       waitForEnd: true
       onStreamFinished: {
         root._lastLsblk = text
@@ -207,12 +216,15 @@ Item {
       root.refreshing = false
       if (exitCode !== 0 && exitCode !== undefined) root.lastError = "lsblk exited " + exitCode
     }
+    // Hard deadline: kill after 5s
+    Timer { interval: 5000; repeat: false; running: lsblkProc.running; onTriggered: if (lsblkProc.running) lsblkProc.kill() }
   }
 
   Process {
     id: dfProc
-    command: ["df", "-B1", "--output=pcent,used,target"]
+    command: ["/usr/bin/df", "-B1", "--output=pcent,used,target"]
     stdout: StdioCollector {
+      maxBytes: 32768
       waitForEnd: true
       onStreamFinished: {
         root._lastDf = text
@@ -222,33 +234,36 @@ Item {
         }
       }
     }
+    Timer { interval: 5000; repeat: false; running: dfProc.running; onTriggered: if (dfProc.running) dfProc.kill() }
   }
 
   // Single action process for mount/unmount; command is reassigned each call.
   Process {
     id: actionProc
-    stdout: StdioCollector { waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
+    stdout: StdioCollector { maxBytes: 16384; waitForEnd: true }
+    stderr: StdioCollector { maxBytes: 16384; waitForEnd: true }
     onExited: function(exitCode) {
       if (exitCode !== 0) {
         var err = String(actionProc.stderr.text || "").trim()
         if (err.length === 0) err = "udisksctl exited " + exitCode
-        root.lastError = err
+        root.lastError = sanitize(err, 256)
       } else {
         root.lastError = ""
       }
       postActionTimer.restart()
     }
+    Timer { interval: 30000; repeat: false; running: actionProc.running; onTriggered: if (actionProc.running) actionProc.kill() }
   }
 
   // udev events trigger a debounced refresh.
   Process {
     id: udevProc
-    command: ["stdbuf", "-oL", "udevadm", "monitor", "--udev", "--subsystem-match=block"]
+    command: ["/usr/bin/stdbuf", "-oL", "/usr/bin/udevadm", "monitor", "--udev", "--subsystem-match=block"]
     running: true
     stdout: SplitParser {
       onRead: function(line) {
-        if (/(add|remove|change|bind|unbind|move)/.test(String(line))) udevDebounce.restart()
+        var l = sanitize(line, 512)
+        if (/(add|remove|change|bind|unbind|move)/.test(l)) udevDebounce.restart()
       }
     }
     onExited: udevRestart.restart()
@@ -261,10 +276,17 @@ Item {
     onTriggered: root.refresh()
   }
 
+  // Supervised restart with exponential backoff (3s, 6s, 12s, 24s, max 60s)
+  property int _udevBackoff: 3000
   Timer {
     id: udevRestart
-    interval: 3000
+    interval: root._udevBackoff
     repeat: false
-    onTriggered: if (!udevProc.running) udevProc.running = true
+    onTriggered: {
+      if (!udevProc.running) {
+        udevProc.running = true
+        root._udevBackoff = Math.min(root._udevBackoff * 2, 60000)
+      }
+    }
   }
 }

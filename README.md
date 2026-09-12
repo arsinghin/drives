@@ -15,10 +15,23 @@ An Omarchy bar widget for managing drives — mount, unmount, and open removable
 ## Installation
 
 ```bash
-# Clone to your Omarchy plugins directory
-git clone https://github.com/arsinghin/drives.git ~/.config/omarchy/plugins/drives
+# Download and install from latest release (immutable tarball)
+wget https://github.com/arsinghin/drives/releases/latest/download/drives.tar.gz
+tar -xzf drives.tar.gz -C ~/.config/omarchy/plugins/
+omarchy restart shell
+```
 
-# Restart the shell to load
+Or pin a specific version:
+```bash
+wget https://github.com/arsinghin/drives/releases/download/v1.0.1/drives.tar.gz
+tar -xzf drives.tar.gz -C ~/.config/omarchy/plugins/
+omarchy restart shell
+```
+
+## Removal
+
+```bash
+rm -rf ~/.config/omarchy/plugins/drives
 omarchy restart shell
 ```
 
