@@ -171,6 +171,22 @@ Item {
     Util.execArgv(["/usr/bin/xdg-open", mountpoint])
   }
 
+  // TERM→KILL with process group cleanup
+  function killProcessGroup(proc) {
+    if (!proc.running) return
+    try {
+      // Try SIGTERM first (graceful)
+      proc.kill("SIGTERM")
+      // Fallback to SIGKILL after 2s
+      Timer.singleShot(2000, function() {
+        if (proc.running) proc.kill("SIGKILL")
+      })
+    } catch (e) {
+      // If kill fails, force SIGKILL immediately
+      proc.kill("SIGKILL")
+    }
+  }
+
   Component.onCompleted: {
     refresh()
   }
@@ -199,6 +215,7 @@ Item {
   Process {
     id: lsblkProc
     command: ["/usr/bin/lsblk", "-J", "-b", "-o", "NAME,PATH,LABEL,MOUNTPOINT,FSTYPE,SIZE"]
+    environment: {}
     stdout: StdioCollector {
       maxBytes: 65536
       waitForEnd: true
@@ -216,13 +233,14 @@ Item {
       root.refreshing = false
       if (exitCode !== 0 && exitCode !== undefined) root.lastError = "lsblk exited " + exitCode
     }
-    // Hard deadline: kill after 5s
-    Timer { interval: 5000; repeat: false; running: lsblkProc.running; onTriggered: if (lsblkProc.running) lsblkProc.kill() }
+    // Hard deadline: TERM→KILL after 5s
+    Timer { interval: 5000; repeat: false; running: lsblkProc.running; onTriggered: if (lsblkProc.running) killProcessGroup(lsblkProc) }
   }
 
   Process {
     id: dfProc
     command: ["/usr/bin/df", "-B1", "--output=pcent,used,target"]
+    environment: {}
     stdout: StdioCollector {
       maxBytes: 32768
       waitForEnd: true
@@ -234,12 +252,13 @@ Item {
         }
       }
     }
-    Timer { interval: 5000; repeat: false; running: dfProc.running; onTriggered: if (dfProc.running) dfProc.kill() }
+    Timer { interval: 5000; repeat: false; running: dfProc.running; onTriggered: if (dfProc.running) killProcessGroup(dfProc) }
   }
 
   // Single action process for mount/unmount; command is reassigned each call.
   Process {
     id: actionProc
+    environment: {}
     stdout: StdioCollector { maxBytes: 16384; waitForEnd: true }
     stderr: StdioCollector { maxBytes: 16384; waitForEnd: true }
     onExited: function(exitCode) {
@@ -252,18 +271,31 @@ Item {
       }
       postActionTimer.restart()
     }
-    Timer { interval: 30000; repeat: false; running: actionProc.running; onTriggered: if (actionProc.running) actionProc.kill() }
+    Timer { interval: 30000; repeat: false; running: actionProc.running; onTriggered: if (actionProc.running) killProcessGroup(actionProc) }
   }
 
   // udev events trigger a debounced refresh.
+  // Bounded line reader: enforces 512-byte line cap during streaming
   Process {
     id: udevProc
     command: ["/usr/bin/stdbuf", "-oL", "/usr/bin/udevadm", "monitor", "--udev", "--subsystem-match=block"]
+    environment: {}
     running: true
-    stdout: SplitParser {
-      onRead: function(line) {
-        var l = sanitize(line, 512)
-        if (/(add|remove|change|bind|unbind|move)/.test(l)) udevDebounce.restart()
+    stdout: StdioCollector {
+      maxBytes: 131072  // 128KB total buffer cap
+      waitForEnd: false
+      onRead: function(chunk) {
+        // Bounded line parsing: split on newline, cap each line at 512 bytes
+        var lines = String(chunk).split("\n")
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i]
+          if (line.length > 512) line = line.slice(0, 512)
+          var l = sanitize(line, 512)
+          if (l.length > 0 && /(add|remove|change|bind|unbind|move)/.test(l)) {
+            udevDebounce.restart()
+            break  // One match per chunk is enough
+          }
+        }
       }
     }
     onExited: udevRestart.restart()
