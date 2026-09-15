@@ -143,11 +143,13 @@ Item {
     if (lsblkProc.running || dfProc.running) return
     refreshing = true
     lsblkProc.running = true
+    lsblkTimeout.running = true
   }
 
   function refreshUsage() {
     if (dfProc.running) return
     dfProc.running = true
+    dfTimeout.running = true
   }
 
   function mountDrive(entry) {
@@ -156,6 +158,7 @@ Item {
     busy = true
     actionProc.command = ["/usr/bin/udisksctl", "mount", "-b", entry.path]
     actionProc.running = true
+    actionTimeout.running = true
   }
 
   function unmountDrive(entry) {
@@ -164,6 +167,7 @@ Item {
     busy = true
     actionProc.command = ["/usr/bin/udisksctl", "unmount", "-b", entry.path]
     actionProc.running = true
+    actionTimeout.running = true
   }
 
   function openMountpoint(mountpoint) {
@@ -175,14 +179,11 @@ Item {
   function killProcessGroup(proc) {
     if (!proc.running) return
     try {
-      // Try SIGTERM first (graceful)
       proc.kill("SIGTERM")
-      // Fallback to SIGKILL after 2s
       Timer.singleShot(2000, function() {
         if (proc.running) proc.kill("SIGKILL")
       })
     } catch (e) {
-      // If kill fails, force SIGKILL immediately
       proc.kill("SIGKILL")
     }
   }
@@ -212,12 +213,36 @@ Item {
     }
   }
 
+  // Process timeout timers (at root level)
+  Timer {
+    id: lsblkTimeout
+    interval: 5000
+    repeat: false
+    running: false
+    onTriggered: if (lsblkProc.running) killProcessGroup(lsblkProc)
+  }
+
+  Timer {
+    id: dfTimeout
+    interval: 5000
+    repeat: false
+    running: false
+    onTriggered: if (dfProc.running) killProcessGroup(dfProc)
+  }
+
+  Timer {
+    id: actionTimeout
+    interval: 30000
+    repeat: false
+    running: false
+    onTriggered: if (actionProc.running) killProcessGroup(actionProc)
+  }
+
   Process {
     id: lsblkProc
     command: ["/usr/bin/lsblk", "-J", "-b", "-o", "NAME,PATH,LABEL,MOUNTPOINT,FSTYPE,SIZE"]
     environment: {}
     stdout: StdioCollector {
-      maxBytes: 65536
       waitForEnd: true
       onStreamFinished: {
         root._lastLsblk = text
@@ -226,15 +251,15 @@ Item {
         root.drives = root.buildDrives(root._blocks, root.usage)
         root.refreshing = false
         root.loaded = true
+        lsblkTimeout.running = false
         root.refreshUsage()
       }
     }
     onExited: function(exitCode) {
+      lsblkTimeout.running = false
       root.refreshing = false
       if (exitCode !== 0 && exitCode !== undefined) root.lastError = "lsblk exited " + exitCode
     }
-    // Hard deadline: TERM→KILL after 5s
-    Timer { interval: 5000; repeat: false; running: lsblkProc.running; onTriggered: if (lsblkProc.running) killProcessGroup(lsblkProc) }
   }
 
   Process {
@@ -242,7 +267,6 @@ Item {
     command: ["/usr/bin/df", "-B1", "--output=pcent,used,target"]
     environment: {}
     stdout: StdioCollector {
-      maxBytes: 32768
       waitForEnd: true
       onStreamFinished: {
         root._lastDf = text
@@ -250,18 +274,22 @@ Item {
         if (root._blocks.length > 0) {
           root.drives = root.buildDrives(root._blocks, root.usage)
         }
+        dfTimeout.running = false
       }
     }
-    Timer { interval: 5000; repeat: false; running: dfProc.running; onTriggered: if (dfProc.running) killProcessGroup(dfProc) }
+    onExited: function(exitCode) {
+      dfTimeout.running = false
+    }
   }
 
   // Single action process for mount/unmount; command is reassigned each call.
   Process {
     id: actionProc
     environment: {}
-    stdout: StdioCollector { maxBytes: 16384; waitForEnd: true }
-    stderr: StdioCollector { maxBytes: 16384; waitForEnd: true }
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
     onExited: function(exitCode) {
+      actionTimeout.running = false
       if (exitCode !== 0) {
         var err = String(actionProc.stderr.text || "").trim()
         if (err.length === 0) err = "udisksctl exited " + exitCode
@@ -271,31 +299,18 @@ Item {
       }
       postActionTimer.restart()
     }
-    Timer { interval: 30000; repeat: false; running: actionProc.running; onTriggered: if (actionProc.running) killProcessGroup(actionProc) }
   }
 
   // udev events trigger a debounced refresh.
-  // Bounded line reader: enforces 512-byte line cap during streaming
   Process {
     id: udevProc
     command: ["/usr/bin/stdbuf", "-oL", "/usr/bin/udevadm", "monitor", "--udev", "--subsystem-match=block"]
     environment: {}
     running: true
-    stdout: StdioCollector {
-      maxBytes: 131072  // 128KB total buffer cap
-      waitForEnd: false
-      onRead: function(chunk) {
-        // Bounded line parsing: split on newline, cap each line at 512 bytes
-        var lines = String(chunk).split("\n")
-        for (var i = 0; i < lines.length; i++) {
-          var line = lines[i]
-          if (line.length > 512) line = line.slice(0, 512)
-          var l = sanitize(line, 512)
-          if (l.length > 0 && /(add|remove|change|bind|unbind|move)/.test(l)) {
-            udevDebounce.restart()
-            break  // One match per chunk is enough
-          }
-        }
+    stdout: SplitParser {
+      onRead: function(line) {
+        var l = sanitize(line, 512)
+        if (l.length > 0 && /(add|remove|change|bind|unbind|move)/.test(l)) udevDebounce.restart()
       }
     }
     onExited: udevRestart.restart()
