@@ -241,7 +241,6 @@ Item {
   Process {
     id: lsblkProc
     command: ["/usr/bin/lsblk", "-J", "-b", "-o", "NAME,PATH,LABEL,MOUNTPOINT,FSTYPE,SIZE"]
-    environment: {}
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -265,7 +264,6 @@ Item {
   Process {
     id: dfProc
     command: ["/usr/bin/df", "-B1", "--output=pcent,used,target"]
-    environment: {}
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -285,27 +283,42 @@ Item {
   // Single action process for mount/unmount; command is reassigned each call.
   Process {
     id: actionProc
-    environment: {}
     stdout: StdioCollector { waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
-    onExited: function(exitCode) {
-      actionTimeout.running = false
-      if (exitCode !== 0) {
-        var err = String(actionProc.stderr.text || "").trim()
-        if (err.length === 0) err = "udisksctl exited " + exitCode
-        root.lastError = sanitize(err, 256)
-      } else {
-        root.lastError = ""
-      }
-      postActionTimer.restart()
-    }
+onExited: function(exitCode) {
+       actionTimeout.running = false
+       if (exitCode !== 0) {
+         var err = String(actionProc.stderr.text || "").trim()
+         if (err.length === 0) err = "udisksctl exited " + exitCode
+         root.lastError = sanitize(err, 256)
+       } else {
+         root.lastError = ""
+         // If this was a successful mount, open the mounted drive
+         if (actionProc.command && 
+             actionProc.command.indexOf("mount") !== -1) {
+           var output = String(actionProc.stdout.text || "").trim();
+           // Parse output like: "Mounted /dev/sdb1 at /run/media/username/label"
+           var atIndex = output.indexOf(" at ");
+           if (atIndex !== -1) {
+             var mountpoint = output.substring(atIndex + 4).trim();
+             // Remove trailing period if present
+             if (mountpoint.endsWith('.')) {
+               mountpoint = mountpoint.slice(0, -1);
+             }
+             if (mountpoint) {
+               root.openMountpoint(mountpoint);
+             }
+           }
+         }
+       }
+       postActionTimer.restart()
+     }
   }
 
   // udev events trigger a debounced refresh.
   Process {
     id: udevProc
     command: ["/usr/bin/stdbuf", "-oL", "/usr/bin/udevadm", "monitor", "--udev", "--subsystem-match=block"]
-    environment: {}
     running: true
     stdout: SplitParser {
       onRead: function(line) {

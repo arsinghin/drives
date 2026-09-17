@@ -20,8 +20,88 @@ Panel {
   readonly property color barFill: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.85)
   readonly property color barTrack: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.12)
   readonly property color barFillWarn: Color.urgent
+  // Theme-composed selection tokens, same pattern as the stock clipboard
+  // plugin: a subtle foreground tint over the dark background, and the
+  // accent color for the selected row's label.
+  readonly property color selectedBackground: Color.menu.selectedBackground
+  readonly property color selectedText: Color.menu.selectedText
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property int barSize: bar ? bar.barSize : Style.bar.sizeHorizontal
+  
+  // Search and keyboard navigation properties (names must not collide
+  // with the base Panel type, which already defines searchText etc.)
+  property string driveSearchText: ""
+  property int driveSelectedIndex: -1
+  property var driveFilteredDrives: []
+
+  Component.onCompleted: {
+    updateFilteredDrives(true)
+  }
+
+  // resetToTop: true when the result set should highlight its top row
+  // (popup open, search text changed); false for background drive-list
+  // refreshes so a selection the user is browsing is preserved.
+  function updateFilteredDrives(resetToTop) {
+    if (!driveSearchText) {
+      driveFilteredDrives = drives.drives
+    } else {
+      var term = driveSearchText.toLowerCase()
+      driveFilteredDrives = drives.drives.filter(function(drive) {
+        // Search in label, displayLabel, name, and mountpoint
+        return (drive.label && drive.label.toLowerCase().includes(term)) ||
+               (drive.displayLabel && drive.displayLabel.toLowerCase().includes(term)) ||
+               (drive.name && drive.name.toLowerCase().includes(term)) ||
+               (drive.mountpoint && drive.mountpoint.toLowerCase().includes(term))
+      })
+    }
+    // Pick the selection: top row by default, previous selection kept
+    // while browsing a background refresh, nothing when no results.
+    if (driveFilteredDrives.length === 0) {
+      driveSelectedIndex = -1
+    } else if (resetToTop || driveSelectedIndex < 0 ||
+               driveSelectedIndex >= driveFilteredDrives.length) {
+      driveSelectedIndex = 0
+    }
+    scrollToSelected()
+  }
+
+  // Keyboard navigation helpers, shared by the key catcher and the
+  // search field's own key handlers.
+  function navUp() {
+    if (driveFilteredDrives.length === 0) return
+    driveSelectedIndex = Math.max(0, (driveSelectedIndex < 0 ? 0 : driveSelectedIndex) - 1)
+    scrollToSelected()
+  }
+
+  function navDown() {
+    if (driveFilteredDrives.length === 0) return
+    driveSelectedIndex = Math.min(driveFilteredDrives.length - 1,
+                                  (driveSelectedIndex < 0 ? -1 : driveSelectedIndex) + 1)
+    scrollToSelected()
+  }
+
+  function activateSelected() {
+    if (driveSelectedIndex >= 0 && driveSelectedIndex < driveFilteredDrives.length) {
+      activateDrive(driveFilteredDrives[driveSelectedIndex])
+    }
+  }
+
+  // Keep the selected row visible in the flickable. Uses the Repeater's
+  // itemAt() so we don't need ids from inside the delegate scope.
+  function scrollToSelected() {
+    if (driveSelectedIndex < 0) return
+    Qt.callLater(function() {
+      var item = driveRepeater.itemAt(driveSelectedIndex)
+      if (!item || panelFlick.contentHeight <= panelFlick.height) return
+      var top = item.y
+      var bottom = item.y + item.height
+      if (top < panelFlick.contentY) {
+        panelFlick.contentY = top
+      } else if (bottom > panelFlick.contentY + panelFlick.height) {
+        panelFlick.contentY = bottom - panelFlick.height
+      }
+    })
+  }
 
   // Bar-button glyph: a hard drive outline (FontAwesome regular). The MD
   // harddisk glyph lives at 0xF02CA, but its rendering varies across nerd
@@ -71,7 +151,30 @@ Panel {
   onVisibleChanged: if (!visible && opened) close()
   onOpenedChanged: if (opened) {
     drives.refresh()
-    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+    // Reset the search box and highlight the top drive right away, so
+    // Enter opens it with zero arrow presses.
+    root.driveSearchText = ""
+    root.updateFilteredDrives(true)
+    // Give the popup a moment to lay out, then put the typing pointer in
+    // the search box so the user can filter or arrow-navigate immediately.
+    searchFocusTimer.restart()
+  }
+
+  Timer {
+    id: searchFocusTimer
+    interval: 60
+    repeat: false
+    onTriggered: searchField.forceActiveFocus()
+  }
+
+  // Re-run the filter whenever the service produces a new drive list, so
+  // the popup stays in sync after mounts/unmounts/plug events. Selection
+  // is preserved (resetToTop false) so browsing isn't disturbed.
+  Connections {
+    target: drives
+    function onDrivesChanged() {
+      root.updateFilteredDrives(false)
+    }
   }
 
   Service {
@@ -103,13 +206,19 @@ Panel {
     contentWidth: panel.fittedContentWidth(Style.space(380))
     contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(560))
 
-    PanelKeyCatcher {
-      id: keyCatcher
-      anchors.fill: parent
+PanelKeyCatcher {
+       id: keyCatcher
+       anchors.fill: parent
 
-      onCloseRequested: root.close()
+       onCloseRequested: root.close()
 
-      Flickable {
+       Keys.onUpPressed: root.navUp()
+       Keys.onDownPressed: root.navDown()
+       Keys.onEnterPressed: root.activateSelected()
+       Keys.onReturnPressed: root.activateSelected()
+       Keys.onEscapePressed: root.close()
+
+       Flickable {
         id: panelFlick
         anchors.fill: parent
         contentWidth: width
@@ -156,42 +265,81 @@ Panel {
             }
           }
 
-          Text {
-            textFormat: Text.PlainText
-            visible: drives.lastError !== ""
-            width: parent.width
-            text: drives.lastError
-            color: Color.urgent
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
-          }
+Text {
+             textFormat: Text.PlainText
+             visible: drives.lastError !== ""
+             width: parent.width
+             text: drives.lastError
+             color: Color.urgent
+             font.family: root.fontFamily
+             font.pixelSize: Style.font.bodySmall
+             wrapMode: Text.WordWrap
+           }
 
-          Repeater {
-            model: drives.drives
+           // Search box: focused as soon as the popup opens. Typing filters
+           // the list live; arrows still move the selection from here.
+           TextField {
+             id: searchField
+             width: parent.width
+             placeholderText: "Search drives…"
+             text: root.driveSearchText
+             color: root.foreground
+             font.family: root.fontFamily
+             font.pixelSize: Style.font.body
+             leftPadding: Style.space(8)
+             rightPadding: Style.space(8)
+             onTextChanged: {
+               root.driveSearchText = text
+               root.updateFilteredDrives(true)
+             }
+             Keys.onUpPressed: root.navUp()
+             Keys.onDownPressed: root.navDown()
+             Keys.onReturnPressed: root.activateSelected()
+             Keys.onEnterPressed: root.activateSelected()
+             Keys.onEscapePressed: root.close()
+           }
 
-            delegate: Item {
-              id: driveRow
-              required property var modelData
-              required property int index
+           Repeater {
+             id: driveRepeater
+             model: root.driveFilteredDrives
 
-              width: column.width
-              implicitHeight: rowContent.implicitHeight + Style.space(8) * 2
+delegate: Item {
+               id: driveRow
+               required property var modelData
+               required property int index
 
-              // Whole-row click target sits at the back, so the action
-              // buttons in front of it capture their own clicks first.
-              MouseArea {
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.activateDrive(modelData)
-                onPressed: function(m) {
-                  if (m.button === Qt.RightButton) {
-                    if (modelData.mounted) drives.unmountDrive(modelData)
-                    m.accepted = true
-                  }
-                }
-              }
+width: column.width
+               implicitHeight: rowContent.implicitHeight + Style.space(8) * 2
+               
+               // Selection properties for keyboard navigation
+               property int repeaterIndex: index
+               property bool isSelected: root.driveSelectedIndex === repeaterIndex
+
+               // Background highlight for selected item
+               Rectangle {
+                 anchors.fill: parent
+                 color: driveRow.isSelected ? root.selectedBackground : "transparent"
+                 visible: driveRow.isSelected
+                 z: -1  // Behind content
+               }
+
+               // Whole-row click target sits at the back, so the action
+               // buttons in front of it capture their own clicks first.
+MouseArea {
+                 anchors.fill: parent
+                 hoverEnabled: true
+                 cursorShape: Qt.PointingHandCursor
+                 onClicked: {
+                   root.driveSelectedIndex = index
+                   root.activateDrive(modelData)
+                 }
+                 onPressed: function(m) {
+                   if (m.button === Qt.RightButton) {
+                     if (modelData.mounted) drives.unmountDrive(modelData)
+                     m.accepted = true
+                   }
+                 }
+               }
 
               RowLayout {
                 id: rowContent
@@ -207,16 +355,17 @@ Panel {
                     width: parent.width
                     spacing: Style.space(8)
 
-                    Text {
-                      textFormat: Text.PlainText
-                      text: modelData.displayLabel
-                      color: modelData.mounted ? root.foreground : root.dim
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.body
-                      font.bold: true
-                      elide: Text.ElideRight
-                      Layout.fillWidth: true
-                    }
+                     Text {
+                       textFormat: Text.PlainText
+                       text: modelData.displayLabel
+                       color: driveRow.isSelected ? root.selectedText
+                             : (modelData.mounted ? root.foreground : root.dim)
+                       font.family: root.fontFamily
+                       font.pixelSize: Style.font.body
+                       font.bold: true
+                       elide: Text.ElideRight
+                       Layout.fillWidth: true
+                     }
 
                     Text {
                       textFormat: Text.PlainText
@@ -291,53 +440,38 @@ Panel {
                   Layout.preferredWidth: Style.space(72)
                   spacing: Style.space(8)
 
-                  PanelActionButton {
-                    width: Style.space(28)
-                    height: Style.space(28)
-                    // Distinct, unambiguous icons: a plus for mount and an X
-                    // for unmount, drawn at the same size so the row stays
-                    // balanced. The previous tray_arrow_* pair looked too
-                    // similar at a glance.
-                    iconText: modelData.mounted ? "\uf00d" : "\uf067"  // fa-close : fa-plus
-                    tooltipText: modelData.mounted ? "Unmount " + modelData.displayLabel : "Mount " + modelData.displayLabel
-                    foreground: modelData.mounted ? Color.urgent : root.foreground
-                    hoverColor: modelData.mounted ? Color.urgent : root.foreground
-                    fontFamily: root.fontFamily
-                    fontSize: Style.font.body
-                    bordered: true
-                    // Grey out while a mount/unmount on this row is in
-                    // flight; the row's text and bar reflect busy state too.
-                    enabled: !drives.busy || drives.busyPath !== modelData.path
-                    Layout.alignment: Qt.AlignRight
-                    onClicked: {
-                      if (modelData.mounted) drives.unmountDrive(modelData)
-                      else drives.mountDrive(modelData)
-                    }
-                  }
+PanelActionButton {
+                     width: Style.space(28)
+                     height: Style.space(28)
+                     // Distinct, unambiguous icons: a plus for mount and an X
+                     // for unmount, drawn at the same size so the row stays
+                     // balanced. The previous tray_arrow_* pair looked too
+                     // similar at a glance.
+                     iconText: modelData.mounted ? "\uf00d" : "\uf067"  // fa-close : fa-plus
+                     tooltipText: modelData.mounted ? "Unmount " + modelData.displayLabel : "Mount " + modelData.displayLabel
+                     foreground: modelData.mounted ? Color.urgent : root.foreground
+                     hoverColor: modelData.mounted ? Color.urgent : root.foreground
+                     fontFamily: root.fontFamily
+                     fontSize: Style.font.body
+                     bordered: true
+                     // Grey out while a mount/unmount on this row is in
+                     // flight; the row's text and bar reflect busy state too.
+                     enabled: !drives.busy || drives.busyPath !== modelData.path
+                     Layout.alignment: Qt.AlignRight
+                     onClicked: {
+                       if (modelData.mounted) drives.unmountDrive(modelData)
+                       else drives.mountDrive(modelData)
+                     }
+                   }
 
-                  PanelActionButton {
-                    visible: modelData.mounted
-                    width: Style.space(28)
-                    height: Style.space(28)
-                    iconText: "\uf07b"  // nf-fa-folder-open
-                    tooltipText: "Open " + modelData.mountpoint + " in file manager"
-                    foreground: root.foreground
-                    fontFamily: root.fontFamily
-                    fontSize: Style.font.body
-                    bordered: true
-                    enabled: !drives.busy
-                    Layout.alignment: Qt.AlignRight
-                    onClicked: drives.openMountpoint(modelData.mountpoint)
-                  }
-
-                  // Spacer so an unmounted row's single button still sits
-                  // vertically centered next to a mounted row's two buttons.
-                  Item {
-                    visible: !modelData.mounted
-                    Layout.alignment: Qt.AlignRight
-                    Layout.preferredWidth: Style.space(28)
-                    Layout.preferredHeight: Style.space(28)
-                  }
+                   // Spacer so an unmounted row's single button still sits
+                   // vertically centered next to a mounted row's two buttons.
+                   Item {
+                     visible: !modelData.mounted
+                     Layout.alignment: Qt.AlignRight
+                     Layout.preferredWidth: Style.space(28)
+                     Layout.preferredHeight: Style.space(28)
+                   }
                 }
               }
             }

@@ -5,9 +5,14 @@ An Omarchy bar widget for managing drives — mount, unmount, and open removable
 ## Features
 
 - Lists all labeled/mounted drives (skips system partitions)
-- Click unmounted drive → mount (with password prompt if needed)
-- Click mounted drive → open in file manager
-- Click ✕ button → unmount
+- Click any drive row:
+  - Mounted → opens in the file manager
+  - Unmounted → mounts (password prompt if needed) **and opens automatically** — no second click
+- **Search-first popup**: opens with the typing pointer already in the search box; type to filter drives live by label, display name, device, or mountpoint (e.g. `f:` for `Local F:` / `F:`)
+- **Keyboard navigation**: ↑/↓ to move through the list, Enter to open the highlighted drive (mounts first if needed), Esc to close
+- **Top result always highlighted**: on popup open and as search results change; theme-aware accent colors for the selection
+- ✕/＋ buttons to unmount/mount, right-click a mounted row to unmount
+- Right-click the bar icon to rescan, middle-click to open the first mounted drive
 - Live updates on plug/unplug
 - Usage bars with percentages
 - Configurable refresh interval (default 5s, set via `shell.json`)
@@ -30,7 +35,7 @@ omarchy restart shell
 
 ## Screenshot
 
-![Drives plugin](screenshot.png)
+![Drives plugin](preview.png)
 
 ## Configuration
 
