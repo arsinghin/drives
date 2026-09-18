@@ -339,9 +339,18 @@ MouseArea {
                    if (m.button === Qt.RightButton) {
                      if (modelData.mounted) drives.unmountDrive(modelData)
                      m.accepted = true
-                   }
-                 }
-               }
+}
+     }
+     Text {
+         textFormat: Text.PlainText
+         text: "t: Open in terminal   i: Show Properties   p: Pin/unpin   m: Mount   u: Unmount   e: Eject"
+         color: root.dim
+         font.family: root.fontFamily
+         font.pixelSize: Style.font.caption
+         width: parent.width
+         horizontalAlignment: Text.AlignHCenter
+     }
+   }
 
               RowLayout {
                 id: rowContent
@@ -369,17 +378,22 @@ MouseArea {
                        Layout.fillWidth: true
                      }
 
-                    Text {
-                      textFormat: Text.PlainText
-                      text: modelData.mounted
-                        ? modelData.mountpoint
-                        : (modelData.path + " · not mounted")
-                      color: root.dim
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.caption
-                      elide: Text.ElideMiddle
-                      Layout.maximumWidth: Style.space(180)
-                    }
+Text {
+                       textFormat: Text.PlainText
+                       text: modelData.mounted ? modelData.mountpoint : modelData.path
+                       color: root.dim
+                       font.family: root.fontFamily
+                       font.pixelSize: Style.font.caption
+                       elide: Text.ElideMiddle
+                       Layout.maximumWidth: Style.space(180)
+                     }
+                     Text {
+                       textFormat: Text.PlainText
+                       text: modelData.fstype ? (" (" + modelData.fstype + ")") : ""
+                       color: root.dim
+                       font.family: root.fontFamily
+                       font.pixelSize: Style.font.caption
+                     }
                   }
 
                   RowLayout {
@@ -437,38 +451,49 @@ MouseArea {
                 // the row's open/mount handler. The column hugs the single
                 // button, so it lands flush at the row's right edge with the
                 // same margin as the row padding.
-                Column {
-                  Layout.alignment: Qt.AlignVCenter
-                  Layout.preferredWidth: Style.space(28)
-                  spacing: Style.space(8)
+Column {
+                   Layout.alignment: Qt.AlignVCenter
+                   Layout.preferredWidth: Style.space(28)
+                   spacing: Style.space(8)
 
                    PanelActionButton {
-                      width: Style.space(28)
-                      height: Style.space(28)
-                      // Distinct, unambiguous icons: a plus for mount and an X
-                      // for unmount, drawn at the same size so the row stays
-                      // balanced. The previous tray_arrow_* pair looked too
-                      // similar at a glance.
-                      iconText: modelData.mounted ? "\uf00d" : "\uf067"  // fa-close : fa-plus
-                      tooltipText: modelData.mounted ? "Unmount " + modelData.displayLabel : "Mount " + modelData.displayLabel
-                      foreground: modelData.mounted ? Color.urgent : root.foreground
-                      hoverColor: modelData.mounted ? Color.urgent : root.foreground
-                      fontFamily: root.fontFamily
-                      fontSize: Style.font.body
-                      bordered: true
-                      // Grey out while a mount/unmount on this row is in
-                      // flight; the row's text and bar reflect busy state too.
-                      enabled: !drives.busy || drives.busyPath !== modelData.path
-                      onClicked: {
-                        if (modelData.mounted) drives.unmountDrive(modelData)
-                        else {
-                          // The drive auto-opens after mounting, so dismiss
-                          // the popup like a row activation would.
-                          close()
-                          drives.mountDrive(modelData)
-                        }
-                      }
-                    }
+                     width: Style.space(28)
+                     height: Style.space(28)
+                     // Determine icon, tooltip, and action
+                     property var actionType: 
+                         modelData.mounted ? 
+                             (modelData.ejectable ? "eject" : "unmount") : 
+                             "mount"
+                     iconText: 
+                         actionType === "mount" ? "\uf067" :   // fa-plus
+                         actionType === "eject" ? "\uf05c" :   // eject symbol (⏏)
+                                                  "\uf00d"      // fa-close (×)
+                     tooltipText: 
+                         actionType === "mount" ? "Mount " + modelData.displayLabel :
+                         actionType === "eject" ? "Eject " + modelData.displayLabel :
+                                                  "Unmount " + modelData.displayLabel
+                     foreground: modelData.mounted ? 
+                         (actionType === "eject" ? Color.urgent : root.foreground) : 
+                         root.foreground
+                     hoverColor: foreground
+                     fontFamily: root.fontFamily
+                     fontSize: Style.font.body
+                     bordered: true
+                     enabled: !drives.busy || drives.busyPath !== modelData.path
+                     onClicked: {
+                         if (actionType === "mount") {
+                             // Mount and auto-open (same as before)
+                             close()
+                             drives.mountDrive(modelData)
+                         } else if (actionType === "eject") {
+                             close()
+                             drives.ejectDrive(modelData)
+                         } else { // unmount
+                             close()
+                             drives.unmountDrive(modelData)
+                         }
+                     }
+                   }
                  }
               }
             }

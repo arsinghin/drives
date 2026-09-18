@@ -78,16 +78,24 @@ Item {
         if (!b) continue
         var candidates = (b.children && b.children.length > 0) ? b.children : [b]
         for (var c = 0; c < candidates.length; c++) {
-          var p = candidates[c]
-          if (!p || !p.name) continue
-          var entry = {
-            name: sanitize(p.name, 32),
-            path: sanitize(p.path || ("/dev/" + p.name), 128),
-            label: sanitize(p.label, 64),
-            mountpoint: sanitize(p.mountpoint, 256),
-            fstype: sanitize(p.fstype, 32),
-            sizeBytes: Number(p.size) || 0
-          }
+var p = candidates[c]
+           if (!p || !p.name) continue
+           var type = sanitize(p.type, 32)
+           var ejectable = false
+           if (type === "disk" || type === "part") {
+               if (!p.name.startsWith("loop") && p.mountpoint !== "/") {
+                   ejectable = true
+               }
+           }
+           var entry = {
+             name: sanitize(p.name, 32),
+             path: sanitize(p.path || ("/dev/" + p.name), 128),
+             label: sanitize(p.label, 64),
+             mountpoint: sanitize(p.mountpoint, 256),
+             fstype: sanitize(p.fstype, 32),
+             sizeBytes: Number(p.size) || 0,
+             ejectable: ejectable
+           }
           if (isUseful(entry)) list.push(entry)
         }
       }
@@ -117,18 +125,19 @@ Item {
     for (var i = 0; i < blockList.length && i < 64; i++) {
       var d = blockList[i]
       var u = d.mountpoint ? usageMap[d.mountpoint] : null
-      out.push({
-        name: d.name,
-        path: d.path,
-        label: d.label,
-        displayLabel: displayLabel(d.label, d.name),
-        mountpoint: d.mountpoint,
-        mounted: !!d.mountpoint,
-        sizeBytes: d.sizeBytes,
-        usedBytes: u ? u.used : 0,
-        percent: u ? u.percent : 0,
-        busy: busyPath === d.path
-      })
+out.push({
+         name: d.name,
+         path: d.path,
+         label: d.label,
+         displayLabel: displayLabel(d.label, d.name),
+         mountpoint: d.mountpoint,
+         mounted: !!d.mountpoint,
+         sizeBytes: d.sizeBytes,
+         usedBytes: u ? u.used : 0,
+         percent: u ? u.percent : 0,
+         busy: busyPath === d.path,
+         ejectable: d.ejectable
+       })
     }
     return out
   }
@@ -161,19 +170,28 @@ Item {
     actionTimeout.running = true
   }
 
-  function unmountDrive(entry) {
-    if (!entry || !entry.path || actionProc.running) return
-    busyPath = entry.path
-    busy = true
-    actionProc.command = ["/usr/bin/udisksctl", "unmount", "-b", entry.path]
-    actionProc.running = true
-    actionTimeout.running = true
-  }
+function unmountDrive(entry) {
+     if (!entry || !entry.path || actionProc.running) return
+     busyPath = entry.path
+     busy = true
+     actionProc.command = ["/usr/bin/udisksctl", "unmount", "-b", entry.path]
+     actionProc.running = true
+     actionTimeout.running = true
+   }
 
-  function openMountpoint(mountpoint) {
-    if (!mountpoint) return
-    Util.execArgv(["/usr/bin/xdg-open", mountpoint])
-  }
+   function ejectDrive(entry) {
+     if (!entry || !entry.path || actionProc.running) return
+     busyPath = entry.path
+     busy = true
+     actionProc.command = ["/usr/bin/udisksctl", "power-off", "-b", entry.path]
+     actionProc.running = true
+     actionTimeout.running = true
+   }
+
+   function openMountpoint(mountpoint) {
+     if (!mountpoint) return
+     Util.execArgv(["/usr/bin/xdg-open", mountpoint])
+   }
 
   // TERM→KILL with process group cleanup
   function killProcessGroup(proc) {
@@ -240,7 +258,7 @@ Item {
 
   Process {
     id: lsblkProc
-    command: ["/usr/bin/lsblk", "-J", "-b", "-o", "NAME,PATH,LABEL,MOUNTPOINT,FSTYPE,SIZE"]
+    command: ["/usr/bin/lsblk", "-J", "-b", "-o", "NAME,PATH,LABEL,MOUNTPOINT,FSTYPE,SIZE,TYPE"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
