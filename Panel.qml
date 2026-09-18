@@ -126,6 +126,8 @@ Panel {
 
   function activateDrive(d) {
     if (!d) return
+    // Dismiss the popup; the action continues in the background.
+    close()
     if (d.mounted) drives.openMountpoint(d.mountpoint)
     else drives.mountDrive(d)
   }
@@ -460,7 +462,12 @@ PanelActionButton {
                      Layout.alignment: Qt.AlignRight
                      onClicked: {
                        if (modelData.mounted) drives.unmountDrive(modelData)
-                       else drives.mountDrive(modelData)
+                       else {
+                         // The drive auto-opens after mounting, so dismiss
+                         // the popup like a row activation would.
+                         close()
+                         drives.mountDrive(modelData)
+                       }
                      }
                    }
 
