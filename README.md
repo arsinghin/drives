@@ -21,8 +21,8 @@ An Omarchy bar widget for managing drives — mount, unmount, and open removable
 
 ```bash
 # Download and verify release tarball (immutable, integrity-checked)
-wget https://github.com/arsinghin/drives/releases/download/v1.0.3/drives.tar.gz
-echo "6dc471e2b6f62fc39557d46508ee3165dac1d7c8cb3a10604fe5faef1609e012  drives.tar.gz" | sha256sum -c - && tar -xzf drives.tar.gz -C ~/.config/omarchy/plugins/
+wget https://github.com/arsinghin/drives/releases/download/v1.1.0/drives.tar.gz
+echo "03a8c56f0f54a015cdb340c45001c50081629e1212ff3705aef5fbbebf434495  drives.tar.gz" | sha256sum -c - && tar -xzf drives.tar.gz -C ~/.config/omarchy/plugins/
 omarchy restart shell
 ```
 

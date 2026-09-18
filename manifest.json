@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "drives",
   "name": "Drives",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "author": "Alok Ranjan Singh",
   "description": "All drives in the Omarchy bar: a single icon opens a popup with every disk, mounted or not — click unmounted to mount, click mounted to open, click ✕ button to unmount.",
   "kinds": [
