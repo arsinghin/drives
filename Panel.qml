@@ -205,7 +205,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(380))
+    contentWidth: panel.fittedContentWidth(Style.space(340))
     contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(560))
 
 PanelKeyCatcher {
@@ -434,52 +434,42 @@ MouseArea {
 
                 // Explicit actions on the right edge of the row. They sit on
                 // top of the row's MouseArea so clicks land on them, not on
-                // the row's open/mount handler. The column is given an
-                // explicit width so its buttons line up across rows even
-                // when one row only has the mount button (no open button).
+                // the row's open/mount handler. The column hugs the single
+                // button, so it lands flush at the row's right edge with the
+                // same margin as the row padding.
                 Column {
                   Layout.alignment: Qt.AlignVCenter
-                  Layout.preferredWidth: Style.space(72)
+                  Layout.preferredWidth: Style.space(28)
                   spacing: Style.space(8)
 
-PanelActionButton {
-                     width: Style.space(28)
-                     height: Style.space(28)
-                     // Distinct, unambiguous icons: a plus for mount and an X
-                     // for unmount, drawn at the same size so the row stays
-                     // balanced. The previous tray_arrow_* pair looked too
-                     // similar at a glance.
-                     iconText: modelData.mounted ? "\uf00d" : "\uf067"  // fa-close : fa-plus
-                     tooltipText: modelData.mounted ? "Unmount " + modelData.displayLabel : "Mount " + modelData.displayLabel
-                     foreground: modelData.mounted ? Color.urgent : root.foreground
-                     hoverColor: modelData.mounted ? Color.urgent : root.foreground
-                     fontFamily: root.fontFamily
-                     fontSize: Style.font.body
-                     bordered: true
-                     // Grey out while a mount/unmount on this row is in
-                     // flight; the row's text and bar reflect busy state too.
-                     enabled: !drives.busy || drives.busyPath !== modelData.path
-                     Layout.alignment: Qt.AlignRight
-                     onClicked: {
-                       if (modelData.mounted) drives.unmountDrive(modelData)
-                       else {
-                         // The drive auto-opens after mounting, so dismiss
-                         // the popup like a row activation would.
-                         close()
-                         drives.mountDrive(modelData)
-                       }
-                     }
-                   }
-
-                   // Spacer so an unmounted row's single button still sits
-                   // vertically centered next to a mounted row's two buttons.
-                   Item {
-                     visible: !modelData.mounted
-                     Layout.alignment: Qt.AlignRight
-                     Layout.preferredWidth: Style.space(28)
-                     Layout.preferredHeight: Style.space(28)
-                   }
-                }
+                   PanelActionButton {
+                      width: Style.space(28)
+                      height: Style.space(28)
+                      // Distinct, unambiguous icons: a plus for mount and an X
+                      // for unmount, drawn at the same size so the row stays
+                      // balanced. The previous tray_arrow_* pair looked too
+                      // similar at a glance.
+                      iconText: modelData.mounted ? "\uf00d" : "\uf067"  // fa-close : fa-plus
+                      tooltipText: modelData.mounted ? "Unmount " + modelData.displayLabel : "Mount " + modelData.displayLabel
+                      foreground: modelData.mounted ? Color.urgent : root.foreground
+                      hoverColor: modelData.mounted ? Color.urgent : root.foreground
+                      fontFamily: root.fontFamily
+                      fontSize: Style.font.body
+                      bordered: true
+                      // Grey out while a mount/unmount on this row is in
+                      // flight; the row's text and bar reflect busy state too.
+                      enabled: !drives.busy || drives.busyPath !== modelData.path
+                      onClicked: {
+                        if (modelData.mounted) drives.unmountDrive(modelData)
+                        else {
+                          // The drive auto-opens after mounting, so dismiss
+                          // the popup like a row activation would.
+                          close()
+                          drives.mountDrive(modelData)
+                        }
+                      }
+                    }
+                 }
               }
             }
           }
