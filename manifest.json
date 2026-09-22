@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "drives",
   "name": "Drives",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "author": "AR Singh",
   "description": "All drives in the Omarchy bar: a single icon opens a popup with every disk, mounted or not — click unmounted to mount, click mounted to open, press 't' to open in terminal, click ✕ button to unmount, ⏏ to eject (power-off) removable drives.",
   "kinds": [

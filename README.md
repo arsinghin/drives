@@ -36,8 +36,8 @@ An Omarchy bar widget for managing drives — mount, unmount, eject, and open re
 
 ```bash
 # Download and verify release tarball (immutable, integrity-checked)
-wget https://github.com/arsinghin/drives/releases/download/v1.2.0/drives.tar.gz
-echo "34e448cb180f1778d13039491fc9f942b5f811c790f2b3d547a9172da8fa5056  drives.tar.gz" | sha256sum -c - && tar -xzf drives.tar.gz -C ~/.config/omarchy/plugins/
+wget https://github.com/arsinghin/drives/releases/download/v2.0.0/drives.tar.gz
+echo "5165ffc2c4b85c0be44ba7ab94a2e8082f0f73b1de8d94cc2bb5220c08b61958  drives.tar.gz" | sha256sum -c - && tar -xzf drives.tar.gz -C ~/.config/omarchy/plugins/
 omarchy restart shell
 ```
 
@@ -48,7 +48,7 @@ rm -rf ~/.config/omarchy/plugins/drives
 omarchy restart shell
 ```
 
-## Screenshot
+## Preview
 
 ![Drives plugin](preview.png)
 
