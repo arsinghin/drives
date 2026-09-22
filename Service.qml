@@ -25,6 +25,8 @@ Item {
   property bool busy: false
   property string busyPath: ""
   property string lastError: ""
+  // Entry target queued for power-off after a chained unmount completes.
+  property string _pendingEject: ""
 
   // user-tunable refresh interval (seconds)
   readonly property int refreshSeconds: {
@@ -73,6 +75,14 @@ Item {
     try {
       var json = JSON.parse(raw || "{}")
       var blocks = json.blockdevices || []
+      // Build a map of parent disk info by name for looking up transport type
+      var parentMap = {}
+      for (var i = 0; i < blocks.length; i++) {
+        var b = blocks[i]
+        if (b && b.name) {
+          parentMap[b.name] = { tran: sanitize(b.tran, 32).toLowerCase(), rm: Number(b.rm) === 1 }
+        }
+      }
       for (var i = 0; i < blocks.length; i++) {
         var b = blocks[i]
         if (!b) continue
@@ -82,20 +92,28 @@ var p = candidates[c]
            if (!p || !p.name) continue
            var type = sanitize(p.type, 32)
            var ejectable = false
-           if (type === "disk" || type === "part") {
-               if (!p.name.startsWith("loop") && p.mountpoint !== "/") {
-                   ejectable = true
-               }
+           // Only USB/external drives are ejectable: check RM (removable) and TRAN (transport)
+           var rm = Number(p.rm) === 1
+           var tran = sanitize(p.tran, 32).toLowerCase()
+           // For partitions, check parent disk's transport if own tran is null
+           if (tran === "" || tran === "null" || tran === "undefined") {
+             var parent = parentMap[p.pkname]
+             if (parent) tran = parent.tran
            }
-           var entry = {
-             name: sanitize(p.name, 32),
-             path: sanitize(p.path || ("/dev/" + p.name), 128),
-             label: sanitize(p.label, 64),
-             mountpoint: sanitize(p.mountpoint, 256),
-             fstype: sanitize(p.fstype, 32),
-             sizeBytes: Number(p.size) || 0,
-             ejectable: ejectable
+           var isUsb = tran === "usb" || tran === "ieee1394" || tran === "thunderbolt"
+           if ((type === "disk" || type === "part") && rm && isUsb) {
+               ejectable = true
            }
+            var entry = {
+              name: sanitize(p.name, 32),
+              path: sanitize(p.path || ("/dev/" + p.name), 128),
+              label: sanitize(p.label, 64),
+              mountpoint: sanitize(p.mountpoint, 256),
+              fstype: sanitize(p.fstype, 32),
+              sizeBytes: Number(p.size) || 0,
+              pkname: sanitize(p.pkname, 32),
+              ejectable: ejectable
+            }
           if (isUseful(entry)) list.push(entry)
         }
       }
@@ -183,7 +201,17 @@ function unmountDrive(entry) {
      if (!entry || !entry.path || actionProc.running) return
      busyPath = entry.path
      busy = true
-     actionProc.command = ["/usr/bin/udisksctl", "power-off", "-b", entry.path]
+     // Power-off targets the whole drive (parent disk), not the partition.
+     var target = entry.pkname ? "/dev/" + entry.pkname : entry.path
+     if (entry.mounted) {
+       // udisksctl power-off refuses while filesystems are mounted:
+       // unmount first, then power off from the exit handler.
+       _pendingEject = target
+       actionProc.command = ["/usr/bin/udisksctl", "unmount", "-b", entry.path]
+     } else {
+       _pendingEject = null
+       actionProc.command = ["/usr/bin/udisksctl", "power-off", "-b", target]
+     }
      actionProc.running = true
      actionTimeout.running = true
    }
@@ -258,7 +286,7 @@ function unmountDrive(entry) {
 
   Process {
     id: lsblkProc
-    command: ["/usr/bin/lsblk", "-J", "-b", "-o", "NAME,PATH,LABEL,MOUNTPOINT,FSTYPE,SIZE,TYPE"]
+    command: ["/usr/bin/lsblk", "-J", "-b", "-o", "NAME,PATH,LABEL,MOUNTPOINT,FSTYPE,SIZE,TYPE,PKNAME,RM,TRAN"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -298,40 +326,34 @@ function unmountDrive(entry) {
     }
   }
 
-  // Single action process for mount/unmount; command is reassigned each call.
+  // Single action process for mount/unmount/eject; command is reassigned each call.
   Process {
     id: actionProc
     stdout: StdioCollector { waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
-onExited: function(exitCode) {
+ onExited: function(exitCode) {
        actionTimeout.running = false
        if (exitCode !== 0) {
          var err = String(actionProc.stderr.text || "").trim()
          if (err.length === 0) err = "udisksctl exited " + exitCode
          root.lastError = sanitize(err, 256)
+         root._pendingEject = null
        } else {
          root.lastError = ""
-         // If this was a successful mount, open the mounted drive
-         if (actionProc.command && 
-             actionProc.command.indexOf("mount") !== -1) {
-           var output = String(actionProc.stdout.text || "").trim();
-           // Parse output like: "Mounted /dev/sdb1 at /run/media/username/label"
-           var atIndex = output.indexOf(" at ");
-           if (atIndex !== -1) {
-             var mountpoint = output.substring(atIndex + 4).trim();
-             // Remove trailing period if present
-             if (mountpoint.endsWith('.')) {
-               mountpoint = mountpoint.slice(0, -1);
-             }
-             if (mountpoint) {
-               root.openMountpoint(mountpoint);
-             }
-           }
+         var cmd = actionProc.command || []
+         // Chain: a successful unmount that was part of an eject now
+         // powers off the drive.
+         if (root._pendingEject && cmd.indexOf("unmount") !== -1) {
+           var ejectTarget = root._pendingEject
+           root._pendingEject = null
+           actionProc.command = ["/usr/bin/udisksctl", "power-off", "-b", ejectTarget]
+           actionProc.running = true
+           return
          }
-       }
-       postActionTimer.restart()
+                 }
+                 postActionTimer.restart()
      }
-  }
+   }
 
   // udev events trigger a debounced refresh.
   Process {
